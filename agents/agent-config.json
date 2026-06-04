@@ -1,0 +1,84 @@
+{
+  "agents": {
+    "commander": {
+      "id": "commander",
+      "name": "财报总指挥",
+      "emoji": "🏦",
+      "role": "总指挥",
+      "description": "统筹调度、质量验收、整合输出",
+      "workspace": "agents/commander",
+      "pipeline": false
+    },
+    "interpreter": {
+      "id": "interpreter",
+      "name": "财报解读官",
+      "emoji": "🔍",
+      "role": "解读官",
+      "description": "通读三张表，提取关键财务数据，标注异常项",
+      "workspace": "agents/interpreter",
+      "pipeline": true
+    },
+    "researcher": {
+      "id": "researcher",
+      "name": "准则研究员",
+      "emoji": "📚",
+      "role": "研究员",
+      "description": "检索会计准则，判断会计政策是否合理，识别会计操纵迹象",
+      "workspace": "agents/researcher",
+      "pipeline": true
+    },
+    "analyst": {
+      "id": "analyst",
+      "name": "比率分析师",
+      "emoji": "⚖️",
+      "role": "分析师",
+      "description": "偿债/盈利/营运/成长四维指标计算，杜邦分析拆解",
+      "workspace": "agents/analyst",
+      "pipeline": true
+    },
+    "risk-watcher": {
+      "id": "risk-watcher",
+      "name": "风险预警员",
+      "emoji": "🔴",
+      "role": "风险预警员",
+      "description": "标注财务风险点：现金流、应收账款、商誉、负债结构",
+      "workspace": "agents/risk-watcher",
+      "pipeline": true
+    },
+    "drafter": {
+      "id": "drafter",
+      "name": "报告起草员",
+      "emoji": "✍️",
+      "role": "起草员",
+      "description": "将分析结果撰写成结构化、可读性强的分析报告",
+      "workspace": "agents/drafter",
+      "pipeline": true
+    },
+    "auditor": {
+      "id": "auditor",
+      "name": "审计顾问",
+      "emoji": "📋",
+      "role": "审计顾问",
+      "description": "终审验收，出具审计意见级别的分析结论",
+      "workspace": "agents/auditor",
+      "pipeline": true
+    }
+  },
+  "pipelines": {
+    "quick_overview": {
+      "name": "快速概览",
+      "steps": ["interpreter", "risk-watcher"],
+      "approver": "commander"
+    },
+    "standard_analysis": {
+      "name": "标准分析",
+      "steps": ["interpreter", "researcher", "analyst", "auditor"],
+      "approver": "commander"
+    },
+    "deep_diagnosis": {
+      "name": "深度诊断",
+      "steps": ["interpreter", "researcher", "analyst", "risk-watcher", "drafter", "auditor"],
+      "approver": "commander"
+    }
+  }
+}
