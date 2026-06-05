@@ -1,6 +1,6 @@
 // 财报精灵 — 前端交互逻辑
 const $=s=>document.querySelector(s),$$=s=>document.querySelectorAll(s);
-let S={keyOk:false,fileName:null,fileContent:null,pipe:'standard_analysis',running:false};
+let S={keyOk:false,fileName:null,fileContent:null,textContent:null,pipe:'standard_analysis',running:false};
 const PIPES=[
   {id:'quick_overview',name:'快速概览',icon:'🔍',steps:'解读官 → 风险预警员'},
   {id:'standard_analysis',name:'标准分析',icon:'📊',steps:'解读官 → 研究员 → 分析师 → 审计顾问'},
@@ -49,6 +49,23 @@ function bindEvents(){
   $('#keyInput').addEventListener('keydown',function(e){if(e.key==='Enter')svKey()});
   $('#btnGo').addEventListener('click',start);
   $('#linkGetKey').addEventListener('click',function(e){e.preventDefault();window.open('https://platform.deepseek.com/api_keys','_blank')});
+  // 文字输入实时监听
+  $('#textInput').addEventListener('input',function(){
+    var len=$('#textInput').value.length;
+    $('#charCount').textContent=len+' / 50000 字';
+    S.textContent=$('#textInput').value.trim()||null;
+    S.fileContent=null; S.fileName=null;
+    $('#uploadZone').classList.remove('has-file');
+    $('#uploadZone').querySelector('.up-icon').textContent='📤';
+    $('#uploadZone').querySelector('.up-text').textContent='点击上传财务数据';
+    $('#uploadZone').querySelector('.up-hint').innerHTML='拖拽或点击 · 支持 .txt .md';
+    if(S.textContent){
+      $('#liveStream').textContent='已输入文字内容（'+S.textContent.length+' 字符）';
+      $('#emptyState').style.display='none';
+      $('#progressPanel').classList.add('visible');
+    }
+    upBtn();
+  });
 }
 
 // ── Key 管理 ──
@@ -83,7 +100,8 @@ async function svKey(){
 function hdFile(f){
   var ext=f.name.split('.').pop().toLowerCase();
   if(['txt','md'].indexOf(ext)===-1){alert('支持 .txt .md 格式');return}
-  S.fileName=f.name;
+  S.fileName=f.name; S.textContent=null;
+  $('#textInput').value=''; $('#charCount').textContent='0 / 50000 字';
   var r=new FileReader();
   r.onload=function(e){
     S.fileContent=e.target.result;
@@ -104,7 +122,7 @@ function upBtn(){
   if(S.running){b.disabled=true;b.classList.add('running');b.textContent='⏳ 分析中...';return}
   b.classList.remove('running');
   if(!S.keyOk){b.disabled=true;b.textContent='请先配置 API Key'}
-  else if(!S.fileContent){b.disabled=true;b.textContent='请先上传财报数据'}
+  else if(!S.fileContent&&!S.textContent){b.disabled=true;b.textContent='请上传财报数据或输入文字'}
   else{b.disabled=false;b.textContent='开始分析'}
 }
 
@@ -120,7 +138,7 @@ function updateStageCard(name,status){
 
 // ── 分析流程 ──
 async function start(){
-  if(S.running||!S.fileContent)return;
+  if(S.running||(!S.fileContent&&!S.textContent))return;
   S.running=true;upBtn();setHS('分析中...',true);
   $('#progressPanel').classList.add('visible');$('#resultPanel').classList.remove('visible');$('#emptyState').style.display='none';
 
@@ -131,9 +149,12 @@ async function start(){
   $('#stages').innerHTML=st.map(function(s){return '<div class="stage-card pending" data-s="'+s.n+'"><div class="sc-icon">'+s.e+'</div><div class="sc-name">'+s.n+'</div><div class="sc-role">'+s.r+'</div><div class="sc-badge">等待</div></div>'}).join('');
   $('#liveStream').textContent='🚀 启动分析流程...';
 
+  var content=S.fileContent||S.textContent;
+  var fileName=S.fileName||('手动输入（'+content.length+'字）');
+
   var result=null;
   try{
-    result=await window.fadian.runReview({content:S.fileContent,fileName:S.fileName,pipelineType:S.pipe});
+    result=await window.fadian.runReview({content:content,fileName:fileName,pipelineType:S.pipe});
   }catch(err){
     $('#liveStream').textContent+='\n\n❌ '+err.message;
     setHS('分析失败',false);S.running=false;upBtn();return;
@@ -144,7 +165,8 @@ async function start(){
 
 function showResult(r){
   $('#progressPanel').classList.remove('visible');$('#resultPanel').classList.add('visible');
-  $('#resultMeta').innerHTML='<div class="meta-item">📋 '+(r.pipelineName||'标准分析')+'</div><div class="meta-item">⏱ '+(r.elapsedSeconds||'?')+' 秒</div><div class="meta-item">📄 '+S.fileName+'</div>';
+  var fn=S.fileName||('手动输入');
+  $('#resultMeta').innerHTML='<div class="meta-item">📋 '+(r.pipelineName||'标准分析')+'</div><div class="meta-item">⏱ '+(r.elapsedSeconds||'?')+' 秒</div><div class="meta-item">📄 '+fn+'</div>';
   var ss=r.stages||[];
   $('#resultTabs').style.display='flex';
   $('#resultTabs').innerHTML=ss.map(function(s,i){return '<button class="result-tab'+(i===ss.length-1?' active':'')+'" data-t="'+i+'">'+s.emoji+' '+s.name+'</button>'}).join('');
