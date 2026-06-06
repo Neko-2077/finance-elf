@@ -5,6 +5,7 @@
  */
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { getApiKey, saveApiKey, runPipeline } = require('./pipeline-engine');
 
 let mainWindow;
@@ -57,7 +58,63 @@ ipcMain.handle('api:check-key', async () => {
 ipcMain.handle('api:run-review', async (_event, data) => {
   const { content, fileName, pipelineType } = data;
   const result = await runPipeline(content, fileName, pipelineType);
+  saveHistory(result, pipelineType, fileName);
   return result;
+});
+
+// ── 历史记录 ──
+const HISTORY_FILE = path.join(app.getPath('userData'), 'review-history.json');
+const MAX_HISTORY = 10;
+
+function saveHistory(result, pipelineType, fileName) {
+  let history = [];
+  try {
+    if (fs.existsSync(HISTORY_FILE)) {
+      history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf-8'));
+    }
+  } catch (e) { /* ignore corrupt file */ }
+  history.unshift({
+    id: Date.now(),
+    time: new Date().toISOString(),
+    pipelineType: pipelineType,
+    fileName: fileName || '(手动输入)',
+    result: result
+  });
+  if (history.length > MAX_HISTORY) history = history.slice(0, MAX_HISTORY);
+  try {
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2), 'utf-8');
+  } catch (e) { console.error('[saveHistory] write failed:', e.message); }
+}
+
+ipcMain.handle('api:load-history', async () => {
+  try {
+    if (!fs.existsSync(HISTORY_FILE)) return [];
+    const raw = fs.readFileSync(HISTORY_FILE, 'utf-8');
+    return JSON.parse(raw);
+  } catch (e) { return []; }
+});
+
+ipcMain.handle('api:load-latest', async () => {
+  try {
+    if (!fs.existsSync(HISTORY_FILE)) return null;
+    const history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf-8'));
+    return history.length > 0 ? history[0] : null;
+  } catch (e) { return null; }
+});
+
+ipcMain.handle('api:export-file', async (_event, { content, defaultName, filters }) => {
+  const { dialog } = require('electron');
+  const result = await dialog.showSaveDialog(mainWindow, {
+    defaultPath: defaultName,
+    filters: filters
+  });
+  if (result.canceled || !result.filePath) return { success: false };
+  try {
+    fs.writeFileSync(result.filePath, content, 'utf-8');
+    return { success: true, filePath: result.filePath };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
 });
 
 function maskKey(key) {

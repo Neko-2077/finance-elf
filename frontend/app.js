@@ -32,6 +32,14 @@ async function api(url,body){
   S.pipe='standard_analysis';
   await ckKey();
   bindEvents();
+  // 恢复上次分析结果 + 加载历史列表
+  if(isElectron){
+    try{
+      var prev=await window.fadian.loadLatest();
+      if(prev&&prev.result){showResult(prev.result)}
+    }catch(e){console.error('[init] loadLatest err:',e)}
+    refreshHistoryList();
+  }
 })();
 
 function bindEvents(){
@@ -49,6 +57,16 @@ function bindEvents(){
   $('#keyInput').addEventListener('keydown',function(e){if(e.key==='Enter')svKey()});
   $('#btnGo').addEventListener('click',start);
   $('#linkGetKey').addEventListener('click',function(e){e.preventDefault();window.open('https://platform.deepseek.com/api_keys','_blank')});
+  // 历史面板
+  $('#historyHeader').addEventListener('click',function(){
+    var list=$('#historyList');
+    var toggle=$('#historyToggle');
+    var open=list.classList.contains('open');
+    if(open){list.classList.remove('open');toggle.classList.remove('open')}
+    else{list.classList.add('open');toggle.classList.add('open');refreshHistoryList()}
+  });
+  // 导出按钮
+  bindExportEvents();
   // 文字输入实时监听
   $('#textInput').addEventListener('input',function(){
     var len=$('#textInput').value.length;
@@ -164,9 +182,13 @@ async function start(){
 }
 
 function showResult(r){
+  lastResult=r;
+  lastResult.fileName=lastResult.fileName||S.fileName||('手动输入');
+  lastResult.pipelineName=lastResult.pipelineName||(PIPES.find(function(p){return p.id===S.pipe})||PIPES[1]).name;
   $('#progressPanel').classList.remove('visible');$('#resultPanel').classList.add('visible');
-  var fn=S.fileName||('手动输入');
-  $('#resultMeta').innerHTML='<div class="meta-item">📋 '+(r.pipelineName||'标准分析')+'</div><div class="meta-item">⏱ '+(r.elapsedSeconds||'?')+' 秒</div><div class="meta-item">📄 '+fn+'</div>';
+  var fn=lastResult.fileName||S.fileName||('手动输入');
+  var pipe=PIPES.find(function(p){return p.name===lastResult.pipelineName})||PIPES[1];
+  $('#resultMeta').innerHTML='<div class="meta-item">'+pipe.icon+' '+lastResult.pipelineName+'</div><div class="meta-item">⏱ '+(r.elapsedSeconds||'?')+' 秒</div><div class="meta-item">📄 '+fn+'</div>';
   var ss=r.stages||[];
   $('#resultTabs').style.display='flex';
   $('#resultTabs').innerHTML=ss.map(function(s,i){return '<button class="result-tab'+(i===ss.length-1?' active':'')+'" data-t="'+i+'">'+s.emoji+' '+s.name+'</button>'}).join('');
@@ -177,6 +199,7 @@ function showResult(r){
     t.classList.add('active');$('.result-tab-content[data-t="'+t.dataset.t+'"]').classList.add('active');
   })});
   $('#mainContent').scrollTop=0;
+  refreshHistoryList();
 }
 
 // ── Markdown → HTML ──
@@ -202,5 +225,107 @@ function md2h(md){
   h=h.replace(/<p><\/(h[1-4]|ul|ol|table|blockquote|hr|tr)>/g,'</$1>');
   h=h.replace(/<(h[1-4]|ul|ol|table|blockquote|hr|tr)><\/p>/g,'<$1>');
   h=h.replace(/<p><\/p>/g,'');
+  return h;
+}
+
+// ── 历史列表 ──
+async function refreshHistoryList(){
+  if(!isElectron)return;
+  try{
+    var history=await window.fadian.loadHistory();
+    var list=$('#historyList');
+    if(!history.length){list.innerHTML='<div class="history-item" style="color:var(--text3)">暂无历史记录</div>';return}
+    list.innerHTML=history.map(function(h,i){
+      var pipeName=PIPES.find(function(p){return p.id===h.pipelineType});
+      pipeName=pipeName?pipeName.name:'分析';
+      var time=new Date(h.time).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+      var fn=(h.fileName||'').replace(/\.(txt|md)$/i,'');
+      return '<div class="history-item" data-idx="'+i+'" onclick="loadHistoryItem('+i+')"><span class="hi-name">'+pipeName+' · '+fn+'</span><span class="hi-time">'+time+'</span></div>';
+    }).join('');
+  }catch(e){console.error('[refreshHistoryList]',e)}
+}
+
+window.loadHistoryItem=async function(idx){
+  try{
+    var history=await window.fadian.loadHistory();
+    var item=history[idx];
+    if(item&&item.result){
+      item.result.fileName=item.fileName;
+      item.result.pipelineName=PIPES.find(function(p){return p.id===item.pipelineType}).name;
+      showResult(item.result);
+      $('#historyList').classList.remove('open');
+      $('#historyToggle').classList.remove('open');
+    }
+  }catch(e){console.error('[loadHistoryItem]',e)}
+};
+
+// ── 导出功能 ──
+var lastResult=null;
+
+function bindExportEvents(){
+  $('#btnExportMd').addEventListener('click',function(){doExport('md')});
+  $('#btnExportDocx').addEventListener('click',function(){doExport('docx')});
+  $('#btnExportTxt').addEventListener('click',function(){doExport('txt')});
+}
+
+function buildReportMarkdown(r){
+  var lines=[];
+  var pipeName=r.pipelineName||'标准分析';
+  lines.push('# '+pipeName+' 报告');
+  lines.push('');
+  lines.push('> 生成时间：'+new Date().toLocaleString());
+  lines.push('> 耗时：'+(r.elapsedSeconds||'?')+' 秒');
+  lines.push('');
+  var ss=r.stages||[];
+  for(var i=0;i<ss.length;i++){
+    var s=ss[i];
+    lines.push('## '+s.emoji+' '+s.name);
+    lines.push('');
+    lines.push(s.output||'(无输出)');
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
+function buildReportText(r){
+  return buildReportMarkdown(r).replace(/^#+ /gm,'').replace(/\*\*/g,'').replace(/\*/g,'').replace(/`/g,'').replace(/^> /gm,'').replace(/^---$/gm,'---');
+}
+
+async function doExport(format){
+  if(!lastResult){alert('没有可导出的报告');return}
+  var pipeName=lastResult.pipelineName||'分析';
+  var fn=lastResult.fileName||('手动输入');
+  var content,defaultName,filters;
+  if(format==='docx'){
+    content=buildReportHtml(lastResult);
+    defaultName=pipeName+'报告_'+fn.replace(/\.[^.]+$/,'')+'.doc';
+    filters=[{name:'Word 文档',extensions:['doc','docx']}];
+  }else if(format==='md'){
+    content=buildReportMarkdown(lastResult);
+    defaultName=pipeName+'报告_'+fn.replace(/\.[^.]+$/,'')+'.md';
+    filters=[{name:'Markdown',extensions:['md']}];
+  }else{
+    content=buildReportText(lastResult);
+    defaultName=pipeName+'报告_'+fn.replace(/\.[^.]+$/,'')+'.txt';
+    filters=[{name:'纯文本',extensions:['txt']}];
+  }
+  if(isElectron){
+    var res=await window.fadian.exportFile({content:content,defaultName:defaultName,filters:filters});
+    if(!res.success){if(res.error)alert('导出失败: '+res.error)}
+  }else{
+    var blob=new Blob([content],{type:format==='docx'?'text/html':'text/plain;charset=utf-8'});
+    var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=defaultName;a.click();
+  }
+}
+
+function buildReportHtml(r){
+  var pipeName=r.pipelineName||'标准分析';
+  var h='<html><head><meta charset="UTF-8"><title>'+pipeName+'报告</title>';
+  h+='<style>body{font-family:"Noto Sans SC",sans-serif;line-height:1.8;max-width:780px;margin:40px auto;color:#0f172a}h1{border-bottom:2px solid #1e40af;padding-bottom:8px}h2{border-bottom:1px solid #cbd5e1;padding-bottom:6px;margin-top:1.4em}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #cbd5e1;padding:8px 12px}th{background:#f1f5f9}</style></head><body>';
+  h+='<h1>'+pipeName+' 报告</h1>';
+  h+='<p>生成时间：'+new Date().toLocaleString()+' | 耗时：'+(r.elapsedSeconds||'?')+' 秒</p>';
+  var ss=r.stages||[];
+  for(var i=0;i<ss.length;i++){h+='<h2>'+ss[i].emoji+' '+ss[i].name+'</h2>';h+=md2h(ss[i].output||'(无输出)')}
+  h+='</body></html>';
   return h;
 }
